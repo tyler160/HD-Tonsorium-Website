@@ -52,7 +52,7 @@
   // ---- Persistent Supabase backend (accounts + appointments) ----
   const SUPABASE_URL = 'https://nojgdkwelncrmjsxoxgc.supabase.co';
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_emcHGzxFtx0BiMTTaPMDBw_v3VfDYbK';
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
   const overlay = document.getElementById('booking-overlay');
   const steps = document.querySelectorAll('.booking-step');
@@ -92,7 +92,7 @@
   // ---- Shop dashboard open/close ----
   const dashboardOverlay = document.getElementById('dashboard-overlay');
   async function renderDashboard(){
-    const { data, error } = await supabase.rpc('dashboard_bookings');
+    const { data, error } = await supabaseClient.rpc('dashboard_bookings');
     const list = document.getElementById('dash-list');
     const stats = document.getElementById('dash-stats');
     if (error) {
@@ -174,7 +174,7 @@
 
     const isoDate = toISODate(state.dateObj);
     const bookedTimes = new Set();
-    const { data, error } = await supabase.rpc('booked_times', { p_date: isoDate });
+    const { data, error } = await supabaseClient.rpc('booked_times', { p_date: isoDate });
     if (error) {
       console.error('Could not load appointment availability:', error);
       timeGrid.innerHTML = '<p class="slots-loading">Availability is temporarily unavailable. Please try again.</p>';
@@ -278,7 +278,7 @@
     try{
       const code = 'HDT-' + Math.floor(100000 + Math.random() * 900000);
       const hour24Val = state.time.hour24 + (state.time.min === '30' ? 0.5 : 0);
-      const { data: row_, error } = await supabase.rpc('book_appointment', {
+      const { data: row_, error } = await supabaseClient.rpc('book_appointment', {
         p_confirmation_code: code,
         p_service: state.service.name,
         p_appt_date: formatDate(state.dateObj),
@@ -464,7 +464,7 @@
     if (confirm !== pw){ document.getElementById('signup-confirm-field').classList.add('invalid'); ok = false; }
     if (!ok) return;
 
-    const { data, error } = await supabase.auth.signUp({
+    const { data, error } = await supabaseClient.auth.signUp({
       email,
       password: pw,
       options: { data: { full_name: name }, emailRedirectTo: window.location.origin }
@@ -490,14 +490,14 @@
     if (!pw){ document.getElementById('login-password-field').classList.add('invalid'); ok = false; }
     if (!ok) return;
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pw });
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pw });
     if (error) { showAuthError('login-error', error.message); return; }
     setLoggedIn({ id: data.user.id, name: data.user.user_metadata.full_name || email, email: data.user.email });
     closeAccount();
   });
 
   document.getElementById('account-logout').addEventListener('click', async () => {
-    await supabase.auth.signOut();
+    await supabaseClient.auth.signOut();
     setLoggedOut();
   });
 
@@ -541,7 +541,7 @@
   });
 
   async function handleGoogleCredential(response){
-    const { data, error } = await supabase.auth.signInWithIdToken({
+    const { data, error } = await supabaseClient.auth.signInWithIdToken({
       provider: 'google',
       token: response.credential
     });
@@ -556,7 +556,7 @@
     closeAccount();
   }
 
-  supabase.auth.getUser().then(({ data: { user } }) => {
+  supabaseClient.auth.getUser().then(({ data: { user } }) => {
     if (user) setLoggedIn({ id: user.id, name: user.user_metadata.full_name || user.user_metadata.name || user.email, email: user.email });
   });
 
