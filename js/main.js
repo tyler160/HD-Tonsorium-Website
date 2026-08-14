@@ -396,6 +396,11 @@
     document.body.style.overflow = '';
   }
   accountOpenBtn.addEventListener('click', openAccount);
+  document.getElementById('mobile-account-open').addEventListener('click', () => {
+    nav.classList.remove('open');
+    toggle.setAttribute('aria-expanded', 'false');
+    openAccount();
+  });
   document.getElementById('account-close').addEventListener('click', closeAccount);
   accountOverlay.addEventListener('click', (e) => { if (e.target === accountOverlay) closeAccount(); });
 
