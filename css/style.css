@@ -648,14 +648,25 @@
   }
   .auth-tab.active{background:var(--ink); color:var(--paper);}
 
+  .google-btn-wrap{position:relative; margin-bottom:8px;}
   .google-btn{
     display:flex; align-items:center; justify-content:center; gap:10px; width:100%;
     background:#fff; border:1px solid #d7d7d7; color:#3c4043;
     font-family:var(--body); font-weight:500; font-size:14px;
-    padding:12px 16px; border-radius:2px; cursor:pointer; margin-bottom:8px;
+    padding:12px 16px; border-radius:2px; cursor:pointer; margin-bottom:0;
     transition:box-shadow 0.2s ease;
   }
   .google-btn:hover{box-shadow:0 1px 6px rgba(0,0,0,0.15);}
+  #dashboard-open:hover{color:var(--bone); border-color:var(--bone);}
+  /* Google's real button sits invisibly right on top of the styled button so
+     clicks land on the actual, reliable Google sign-in flow instead of a fake
+     button that has to relay the click via JS. */
+  #google-real-btn{
+    position:absolute; inset:0; overflow:hidden; opacity:0.01;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #google-real-btn iframe{ pointer-events:auto; }
+  .google-btn-wrap.gsi-unavailable #google-real-btn{ display:none; }
   .google-note{
     font-family:var(--mono); font-size:11.5px; color:var(--ash); text-align:center;
     min-height:0; margin:0 0 18px;

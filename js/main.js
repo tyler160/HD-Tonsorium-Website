@@ -50,9 +50,28 @@
   function todayISO(){ return toISODate(new Date()); }
 
   // ---- Persistent Supabase backend (accounts + appointments) ----
+  // Wrapped in try/catch on purpose: if this ever throws (CDN hiccup, ad blocker,
+  // bad key), it must NOT take down every other button on the page with it. Before
+  // this fix, a single failure here silently prevented every event listener defined
+  // further down in the file — including the Google button and Shop Dashboard button
+  // — from ever being attached.
   const SUPABASE_URL = 'https://nojgdkwelncrmjsxoxgc.supabase.co';
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_emcHGzxFtx0BiMTTaPMDBw_v3VfDYbK';
-  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+  let supabaseClient = null;
+  try {
+    if (!window.supabase) throw new Error('Supabase library did not load.');
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+  } catch (err) {
+    console.error('HD Tonsorium: Supabase failed to initialize —', err);
+  }
+  function requireSupabase(noteEl){
+    if (supabaseClient) return true;
+    if (noteEl) {
+      noteEl.textContent = 'Sign-in is temporarily unavailable (backend failed to load). Please refresh the page.';
+      noteEl.classList.add('show');
+    }
+    return false;
+  }
 
   const overlay = document.getElementById('booking-overlay');
   const steps = document.querySelectorAll('.booking-step');
@@ -122,9 +141,14 @@
   }
 
   async function renderDashboard(){
-    const { data, error } = await supabaseClient.rpc('dashboard_bookings');
     const list = document.getElementById('dash-list');
     const stats = document.getElementById('dash-stats');
+    if (!requireSupabase()) {
+      stats.textContent = 'Backend unavailable — please refresh the page.';
+      if (list) list.innerHTML = '';
+      return;
+    }
+    const { data, error } = await supabaseClient.rpc('dashboard_bookings');
     if (error) {
       stats.textContent = 'Sign in with the shop owner account to view appointments.';
       if (list) list.innerHTML = '';
@@ -144,6 +168,10 @@
     document.body.style.overflow = '';
   }
   document.getElementById('dashboard-open').addEventListener('click', openDashboard);
+  // Owner shortcut: visiting the site with #dashboard in the URL (e.g. bookmark
+  // https://yoursite.com/#dashboard) opens the Shop Dashboard straight away,
+  // no hunting for the footer link required.
+  if (window.location.hash === '#dashboard') openDashboard();
   document.getElementById('dashboard-close').addEventListener('click', closeDashboard);
   document.getElementById('dash-search').addEventListener('input', paintDashboard);
   document.querySelectorAll('.dash-tab').forEach(tab => tab.addEventListener('click', () => {
@@ -504,6 +532,7 @@
     if (pw.length < 8){ document.getElementById('signup-password-field').classList.add('invalid'); ok = false; }
     if (confirm !== pw){ document.getElementById('signup-confirm-field').classList.add('invalid'); ok = false; }
     if (!ok) return;
+    if (!requireSupabase(document.getElementById('signup-error'))) return;
 
     const { data, error } = await supabaseClient.auth.signUp({
       email,
@@ -530,6 +559,7 @@
     if (!emailOk){ document.getElementById('login-email-field').classList.add('invalid'); ok = false; }
     if (!pw){ document.getElementById('login-password-field').classList.add('invalid'); ok = false; }
     if (!ok) return;
+    if (!requireSupabase(document.getElementById('login-error'))) return;
 
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pw });
     if (error) { showAuthError('login-error', error.message); return; }
@@ -538,50 +568,89 @@
   });
 
   document.getElementById('account-logout').addEventListener('click', async () => {
+    if (!requireSupabase()) return;
     await supabaseClient.auth.signOut();
     setLoggedOut();
   });
 
   // ---- Google Sign-In ----
-  // Ready to go live: this uses Google's real Identity Services library.
-  // Replace GOOGLE_CLIENT_ID below with a Client ID from Google Cloud Console
-  // (registered to this site's real domain) to activate it.
+  // Real Google Identity Services library, wired to a real Client ID below.
+  //
+  // IMPORTANT FIX: this used to only call google.accounts.id.prompt() (Google's
+  // "One Tap" popup). Chrome's ongoing phase-out of third-party cookies means
+  // One Tap increasingly just does nothing — no error, no popup, totally silent —
+  // unless the browser/site has fully migrated to FedCM. That's almost certainly
+  // why the button appeared broken.
+  //
+  // The fix: render Google's own real button (google.accounts.id.renderButton)
+  // into an invisible layer placed exactly on top of our styled button. The user
+  // still sees and clicks our custom "Continue with Google" button, but the click
+  // is actually landing on Google's real, reliable button underneath. This is
+  // Google's own recommended pattern for custom-styled buttons and doesn't
+  // depend on One Tap/prompt() working at all.
   const GOOGLE_CLIENT_ID = '823851769612-0tt5hvckchh0o2kuofurrcqbjh7tfmk4.apps.googleusercontent.com';
 
   let googleSignInInitialized = false;
+  let googleButtonRendered = false;
 
   function initializeGoogleSignIn() {
     if (googleSignInInitialized) return true;
+    if (!window.google || !window.google.accounts || !window.google.accounts.id) return false;
 
-    if (!window.google || !window.google.accounts || !window.google.accounts.id) {
+    try {
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleCredential
+      });
+      googleSignInInitialized = true;
+      return true;
+    } catch (err) {
+      console.error('HD Tonsorium: Google Sign-In failed to initialize —', err);
       return false;
     }
-
-    google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: handleGoogleCredential
-    });
-    googleSignInInitialized = true;
-    return true;
   }
 
-  document.getElementById('google-signin-btn').addEventListener('click', () => {
+  function renderGoogleButton() {
+    if (googleButtonRendered) return true;
+    const wrap = document.querySelector('.google-btn-wrap');
+    const target = document.getElementById('google-real-btn');
     const note = document.getElementById('google-note');
-    if (GOOGLE_CLIENT_ID.startsWith('YOUR_')){
-      note.textContent = 'This button is wired up and ready — add a real Google OAuth Client ID (Google Cloud Console) for this site\u2019s domain to activate it.';
-      note.classList.add('show');
-      return;
-    }
-    if (!initializeGoogleSignIn()) {
+    if (!initializeGoogleSignIn()) return false;
+    try {
+      google.accounts.id.renderButton(target, {
+        type: 'standard', theme: 'outline', size: 'large',
+        width: 280, text: 'continue_with', logo_alignment: 'left'
+      });
+      googleButtonRendered = true;
+      wrap.classList.remove('gsi-unavailable');
+      return true;
+    } catch (err) {
+      console.error('HD Tonsorium: Google button failed to render —', err);
+      wrap.classList.add('gsi-unavailable');
       note.textContent = 'Google Sign-In could not load. Please check your connection and try again.';
       note.classList.add('show');
-      return;
+      return false;
     }
-    // The Google client is configured once; each click opens the sign-in prompt.
-    google.accounts.id.prompt();
+  }
+
+  // Try as soon as the library is ready, and also right when the account modal
+  // opens (covers the case where the Google script is still loading on first render).
+  (function pollForGoogle(attemptsLeft){
+    if (renderGoogleButton() || attemptsLeft <= 0) return;
+    setTimeout(() => pollForGoogle(attemptsLeft - 1), 300);
+  })(20);
+
+  // Fallback note if someone manages to click the styled button before Google's
+  // real button has finished rendering on top of it.
+  document.getElementById('google-signin-btn').addEventListener('click', () => {
+    if (googleButtonRendered) return; // real button already handled the click
+    const note = document.getElementById('google-note');
+    note.textContent = 'Google Sign-In is still loading — please try again in a moment.';
+    note.classList.add('show');
   });
 
   async function handleGoogleCredential(response){
+    if (!requireSupabase(document.getElementById('google-note'))) return;
     const { data, error } = await supabaseClient.auth.signInWithIdToken({
       provider: 'google',
       token: response.credential
@@ -597,9 +666,11 @@
     closeAccount();
   }
 
-  supabaseClient.auth.getUser().then(({ data: { user } }) => {
-    if (user) setLoggedIn({ id: user.id, name: user.user_metadata.full_name || user.user_metadata.name || user.email, email: user.email });
-  });
+  if (supabaseClient) {
+    supabaseClient.auth.getUser().then(({ data: { user } }) => {
+      if (user) setLoggedIn({ id: user.id, name: user.user_metadata.full_name || user.user_metadata.name || user.email, email: user.email });
+    }).catch(err => console.error('HD Tonsorium: getUser failed —', err));
+  }
 
   // ---- prefill the booking form's name field once signed in ----
   const originalOpenBooking = openBooking;
