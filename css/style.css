@@ -698,15 +698,16 @@
     .footer-grid{grid-template-columns:1fr 1fr;}
   }
 
-  @media (max-width:700px){
+  @media (max-width:900px){
     nav.primary-nav{
       position:fixed; inset:0 0 0 auto; width:78%; max-width:320px; height:100vh;
       background:var(--charcoal-2); flex-direction:column; align-items:flex-start;
       padding:100px 32px 32px; gap:26px;
       transform:translateX(100%); transition:transform 0.35s ease;
       border-left:1px solid rgba(239,231,216,0.1);
+      visibility:hidden; pointer-events:none; z-index:1001; overflow-y:auto;
     }
-    nav.primary-nav.open{transform:translateX(0);}
+    nav.primary-nav.open{transform:translateX(0); visibility:visible; pointer-events:auto;}
     nav.primary-nav button{font-size:17px; text-align:left; width:100%;}
     .menu-toggle{display:flex;}
     section{padding:64px 0;}
