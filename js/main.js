@@ -49,39 +49,10 @@
   function toISODate(d){ return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
   function todayISO(){ return toISODate(new Date()); }
 
-  // ---- Internal SQL database (SQLite compiled to WebAssembly, runs entirely in this browser tab) ----
-  let db = null;
-  const dbReady = initSqlJs({
-    locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.4.0/dist/${file}`
-  }).then(SQL => {
-    db = new SQL.Database();
-    db.run(`
-      CREATE TABLE bookings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        confirmation_code TEXT NOT NULL,
-        service TEXT NOT NULL,
-        appt_date TEXT NOT NULL,
-        appt_date_iso TEXT NOT NULL,
-        appt_time TEXT NOT NULL,
-        appt_hour24 REAL NOT NULL,
-        customer_name TEXT NOT NULL,
-        customer_phone TEXT NOT NULL,
-        notes TEXT,
-        status TEXT NOT NULL DEFAULT 'confirmed',
-        created_at TEXT NOT NULL
-      );
-    `);
-    db.run(`
-      CREATE TABLE accounts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE,
-        password_hash TEXT,
-        auth_provider TEXT NOT NULL DEFAULT 'password',
-        created_at TEXT NOT NULL
-      );
-    `);
-  }).catch(err => console.error('Database failed to initialize:', err));
+  // ---- Persistent Supabase backend (accounts + appointments) ----
+  const SUPABASE_URL = 'https://nojgdkwelncrmjsxoxgc.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_emcHGzxFtx0BiMTTaPMDBw_v3VfDYbK';
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
   const overlay = document.getElementById('booking-overlay');
   const steps = document.querySelectorAll('.booking-step');
@@ -120,10 +91,21 @@
 
   // ---- Shop dashboard open/close ----
   const dashboardOverlay = document.getElementById('dashboard-overlay');
+  async function renderDashboard(){
+    const { data, error } = await supabase.rpc('dashboard_bookings');
+    const list = document.getElementById('dash-list');
+    const stats = document.getElementById('dash-stats');
+    if (error) {
+      stats.textContent = 'Sign in with the shop owner account to view appointments.';
+      if (list) list.innerHTML = '';
+    } else {
+      stats.textContent = `${data.length} appointment${data.length === 1 ? '' : 's'} saved`;
+      if (list) list.innerHTML = data.map(b => `<div class="summary-card"><strong>${b.appt_date} · ${b.appt_time}</strong><br>${b.customer_name} · ${b.customer_phone}<br>${b.service}</div>`).join('') || '<p>No appointments yet.</p>';
+    }
+  }
   async function openDashboard(){
     dashboardOverlay.classList.add('open');
     document.body.style.overflow = 'hidden';
-    await dbReady;
     await renderDashboard();
     document.getElementById('dashboard-close').focus();
   }
@@ -190,17 +172,15 @@
   async function buildTimes(){
     timeGrid.innerHTML = '<p class="slots-loading">Checking availability&hellip;</p>';
 
-    await dbReady;
     const isoDate = toISODate(state.dateObj);
     const bookedTimes = new Set();
-    if (db){
-      const stmt = db.prepare(`SELECT appt_time FROM bookings WHERE appt_date_iso = ? AND status != 'cancelled'`);
-      stmt.bind([isoDate]);
-      while (stmt.step()){
-        bookedTimes.add(stmt.getAsObject().appt_time);
-      }
-      stmt.free();
+    const { data, error } = await supabase.rpc('booked_times', { p_date: isoDate });
+    if (error) {
+      console.error('Could not load appointment availability:', error);
+      timeGrid.innerHTML = '<p class="slots-loading">Availability is temporarily unavailable. Please try again.</p>';
+      return;
     }
+    (data || []).forEach(row => bookedTimes.add(row.appt_time));
 
     timeGrid.innerHTML = '';
     for (let h = OPEN_HOUR; h < CLOSE_HOUR; h += 0.5){
@@ -296,45 +276,27 @@
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Saving\u2026';
     try{
-      await dbReady;
       const code = 'HDT-' + Math.floor(100000 + Math.random() * 900000);
-
-      const insertStmt = db.prepare(
-        `INSERT INTO bookings (confirmation_code, service, appt_date, appt_date_iso, appt_time, appt_hour24, customer_name, customer_phone, notes, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)`
-      );
       const hour24Val = state.time.hour24 + (state.time.min === '30' ? 0.5 : 0);
-      insertStmt.run([
-        code,
-        state.service.name,
-        formatDate(state.dateObj),
-        toISODate(state.dateObj),
-        state.time.label,
-        hour24Val,
-        state.name,
-        state.phone,
-        state.notes || '',
-        new Date().toISOString()
-      ]);
-      insertStmt.free();
-
-      const selectStmt = db.prepare(`SELECT * FROM bookings WHERE confirmation_code = ?`);
-      selectStmt.bind([code]);
-      let row_ = null;
-      if (selectStmt.step()) row_ = selectStmt.getAsObject();
-      selectStmt.free();
+      const { data: row_, error } = await supabase.rpc('book_appointment', {
+        p_confirmation_code: code,
+        p_service: state.service.name,
+        p_appt_date: formatDate(state.dateObj),
+        p_appt_date_iso: toISODate(state.dateObj),
+        p_appt_time: state.time.label,
+        p_appt_hour24: hour24Val,
+        p_customer_name: state.name,
+        p_customer_phone: state.phone,
+        p_notes: state.notes || ''
+      });
+      if (error) throw error;
 
       state.code = code;
       document.getElementById('confirm-code').textContent = code;
       buildSummaryFromRow(row_, 'summary-card-2');
 
       const traceEl = document.getElementById('sql-trace');
-      if (traceEl){
-        traceEl.textContent =
-          "INSERT INTO bookings (...) VALUES (...);\n" +
-          "SELECT * FROM bookings WHERE confirmation_code = '" + code + "';\n\n" +
-          "\u2192 row " + row_.id + " saved to the in-browser database";
-      }
+      if (traceEl) traceEl.textContent = '\u2192 Appointment saved securely to the HD Tonsorium booking system.';
 
       if (document.getElementById('dashboard-overlay').classList.contains('open')){
         renderDashboard();
@@ -502,25 +464,17 @@
     if (confirm !== pw){ document.getElementById('signup-confirm-field').classList.add('invalid'); ok = false; }
     if (!ok) return;
 
-    await dbReady;
-    const existing = db.prepare(`SELECT id FROM accounts WHERE email = ?`);
-    existing.bind([email]);
-    const taken = existing.step();
-    existing.free();
-    if (taken){
-      showAuthError('signup-error', 'An account with that email already exists — try logging in instead.');
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password: pw,
+      options: { data: { full_name: name }, emailRedirectTo: window.location.origin }
+    });
+    if (error) { showAuthError('signup-error', error.message); return; }
+    if (!data.session) {
+      showAuthError('signup-error', 'Check your email to confirm your account, then log in.');
       return;
     }
-
-    const hash = await hashPassword(pw);
-    const stmt = db.prepare(`INSERT INTO accounts (name, email, password_hash, auth_provider, created_at) VALUES (?, ?, ?, 'password', ?)`);
-    stmt.run([name, email, hash, new Date().toISOString()]);
-    stmt.free();
-
-    const idRes = db.exec('SELECT last_insert_rowid() AS id');
-    const newId = idRes[0].values[0][0];
-
-    setLoggedIn({ id: newId, name, email });
+    setLoggedIn({ id: data.user.id, name, email });
     closeAccount();
   });
 
@@ -536,23 +490,14 @@
     if (!pw){ document.getElementById('login-password-field').classList.add('invalid'); ok = false; }
     if (!ok) return;
 
-    await dbReady;
-    const hash = await hashPassword(pw);
-    const stmt = db.prepare(`SELECT id, name, email FROM accounts WHERE email = ? AND password_hash = ?`);
-    stmt.bind([email, hash]);
-    let row = null;
-    if (stmt.step()) row = stmt.getAsObject();
-    stmt.free();
-
-    if (!row){
-      showAuthError('login-error', 'Email or password is incorrect.');
-      return;
-    }
-    setLoggedIn(row);
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pw });
+    if (error) { showAuthError('login-error', error.message); return; }
+    setLoggedIn({ id: data.user.id, name: data.user.user_metadata.full_name || email, email: data.user.email });
     closeAccount();
   });
 
-  document.getElementById('account-logout').addEventListener('click', () => {
+  document.getElementById('account-logout').addEventListener('click', async () => {
+    await supabase.auth.signOut();
     setLoggedOut();
   });
 
@@ -596,28 +541,24 @@
   });
 
   async function handleGoogleCredential(response){
-    const payload = JSON.parse(atob(response.credential.split('.')[1]));
-    const email = (payload.email || '').toLowerCase();
-    const name = payload.name || email;
-    await dbReady;
-
-    const existing = db.prepare(`SELECT id, name, email FROM accounts WHERE email = ?`);
-    existing.bind([email]);
-    let row = null;
-    if (existing.step()) row = existing.getAsObject();
-    existing.free();
-
-    if (row){
-      setLoggedIn(row);
-    } else {
-      const stmt = db.prepare(`INSERT INTO accounts (name, email, auth_provider, created_at) VALUES (?, ?, 'google', ?)`);
-      stmt.run([name, email, new Date().toISOString()]);
-      stmt.free();
-      const idRes = db.exec('SELECT last_insert_rowid() AS id');
-      setLoggedIn({ id: idRes[0].values[0][0], name, email });
+    const { data, error } = await supabase.auth.signInWithIdToken({
+      provider: 'google',
+      token: response.credential
+    });
+    if (error) {
+      const note = document.getElementById('google-note');
+      note.textContent = error.message;
+      note.classList.add('show');
+      return;
     }
+    const user = data.user;
+    setLoggedIn({ id: user.id, name: user.user_metadata.full_name || user.user_metadata.name || user.email, email: user.email });
     closeAccount();
   }
+
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (user) setLoggedIn({ id: user.id, name: user.user_metadata.full_name || user.user_metadata.name || user.email, email: user.email });
+  });
 
   // ---- prefill the booking form's name field once signed in ----
   const originalOpenBooking = openBooking;
