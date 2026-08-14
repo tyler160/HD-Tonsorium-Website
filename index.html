@@ -580,17 +580,27 @@
     <div class="booking-body">
       <div class="dash-stats" id="dash-stats"></div>
 
-      <div class="dash-controls">
-        <input type="text" id="dash-search" placeholder="Search by name or phone&hellip;" aria-label="Search appointments">
-        <div class="dash-tabs" id="dash-tabs" role="tablist">
-          <button type="button" class="dash-tab active" data-filter="upcoming">Upcoming</button>
-          <button type="button" class="dash-tab" data-filter="today">Today</button>
-          <button type="button" class="dash-tab" data-filter="all">All</button>
-          <button type="button" class="dash-tab" data-filter="cancelled">Cancelled</button>
-        </div>
+      <!-- Shown to anyone not signed in as staff. No appointment data is ever
+           fetched or rendered for this state — it's blocked server-side too. -->
+      <div id="dash-locked" style="display:none; text-align:center; padding:36px 20px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ash)" stroke-width="1.6" style="margin-bottom:14px;" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="1.5"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>
+        <p style="font-family:var(--mono); font-size:13px; color:var(--ash); margin-bottom:16px;">This dashboard is only visible to staff accounts.<br>Sign in with an authorized owner/staff account to view appointments.</p>
+        <button type="button" class="btn btn-outline" id="dash-go-signin">Sign In</button>
       </div>
 
-      <div id="dash-list"></div>
+      <div id="dash-authorized" style="display:none;">
+        <div class="dash-controls">
+          <input type="text" id="dash-search" placeholder="Search by name or phone&hellip;" aria-label="Search appointments">
+          <div class="dash-tabs" id="dash-tabs" role="tablist">
+            <button type="button" class="dash-tab active" data-filter="upcoming">Upcoming</button>
+            <button type="button" class="dash-tab" data-filter="today">Today</button>
+            <button type="button" class="dash-tab" data-filter="all">All</button>
+            <button type="button" class="dash-tab" data-filter="cancelled">Cancelled</button>
+          </div>
+        </div>
+
+        <div id="dash-list"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -649,6 +659,38 @@
           </div>
           <p class="auth-error" id="login-error"></p>
           <button type="submit" class="btn btn-primary btn-block">Log In</button>
+          <button type="button" class="link-btn" id="login-forgot-link">Forgot password?</button>
+        </form>
+
+        <!-- Forgot password: request reset email -->
+        <form id="reset-request-form" class="auth-form" style="display:none;">
+          <p class="auth-note" style="margin-top:0;">Enter your email and we'll send you a link to reset your password.</p>
+          <div class="booking-field" id="reset-email-field">
+            <label for="reset-email">Email</label>
+            <input type="email" id="reset-email" autocomplete="email">
+            <span class="booking-field-error">Enter a valid email address.</span>
+          </div>
+          <p class="auth-error" id="reset-request-error"></p>
+          <p class="auth-note" id="reset-request-sent" style="display:none;">Check your email for a reset link.</p>
+          <button type="submit" class="btn btn-primary btn-block">Send Reset Link</button>
+          <button type="button" class="link-btn" id="reset-back-link">Back to Log In</button>
+        </form>
+
+        <!-- Set new password: shown after clicking the reset link from email -->
+        <form id="reset-confirm-form" class="auth-form" style="display:none;">
+          <p class="auth-note" style="margin-top:0;">Choose a new password for your account.</p>
+          <div class="booking-field" id="reset-new-password-field">
+            <label for="reset-new-password">New Password</label>
+            <input type="password" id="reset-new-password" autocomplete="new-password">
+            <span class="booking-field-error">Use at least 8 characters.</span>
+          </div>
+          <div class="booking-field" id="reset-new-confirm-field">
+            <label for="reset-new-confirm">Confirm New Password</label>
+            <input type="password" id="reset-new-confirm" autocomplete="new-password">
+            <span class="booking-field-error">Passwords don't match.</span>
+          </div>
+          <p class="auth-error" id="reset-confirm-error"></p>
+          <button type="submit" class="btn btn-primary btn-block">Set New Password</button>
         </form>
 
         <!-- Sign Up form -->
@@ -677,7 +719,7 @@
           <button type="submit" class="btn btn-primary btn-block">Create Account</button>
         </form>
 
-        <p class="auth-note">Your account is saved securely and will be there the next time you visit.</p>
+        <p class="auth-note" id="guest-bottom-note">Your account is saved securely and will be there the next time you visit.</p>
       </div>
 
       <!-- Logged-in view -->

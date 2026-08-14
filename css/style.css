@@ -683,6 +683,12 @@
   .auth-error.show{display:block;}
 
   .auth-note{font-family:var(--mono); font-size:11px; color:var(--ash); line-height:1.6; margin-top:18px;}
+  .link-btn{
+    display:block; width:100%; text-align:center; background:none; border:none;
+    color:var(--ash); font-family:var(--mono); font-size:11.5px; letter-spacing:0.02em;
+    text-decoration:underline; cursor:pointer; padding:10px 0 0; margin:0;
+  }
+  .link-btn:hover{color:var(--ink);}
 
   .account-summary{display:flex; align-items:center; gap:16px; margin-bottom:20px;}
   .account-summary .big-icon{color:var(--brass); flex:0 0 auto;}

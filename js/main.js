@@ -143,16 +143,27 @@
   async function renderDashboard(){
     const list = document.getElementById('dash-list');
     const stats = document.getElementById('dash-stats');
+    const locked = document.getElementById('dash-locked');
+    const authorized = document.getElementById('dash-authorized');
+
+    function showLocked(msg){
+      stats.textContent = '';
+      locked.style.display = 'block';
+      authorized.style.display = 'none';
+      if (msg) locked.querySelector('p').innerHTML = msg;
+    }
+
     if (!requireSupabase()) {
-      stats.textContent = 'Backend unavailable — please refresh the page.';
-      if (list) list.innerHTML = '';
+      showLocked('Backend unavailable &mdash; please refresh the page.');
       return;
     }
     const { data, error } = await supabaseClient.rpc('dashboard_bookings');
     if (error) {
-      stats.textContent = 'Sign in with the shop owner account to view appointments.';
+      showLocked('This dashboard is only visible to staff accounts.<br>Sign in with an authorized owner/staff account to view appointments.');
       if (list) list.innerHTML = '';
     } else {
+      locked.style.display = 'none';
+      authorized.style.display = 'block';
       dashboardBookings = data || [];
       paintDashboard();
     }
@@ -168,6 +179,10 @@
     document.body.style.overflow = '';
   }
   document.getElementById('dashboard-open').addEventListener('click', openDashboard);
+  document.getElementById('dash-go-signin').addEventListener('click', () => {
+    closeDashboard();
+    openAccount();
+  });
   // Owner shortcut: visiting the site with #dashboard in the URL (e.g. bookmark
   // https://yoursite.com/#dashboard) opens the Shop Dashboard straight away,
   // no hunting for the footer link required.
@@ -436,6 +451,7 @@
   // database, plus a Google Sign-In entry point)
   // =====================================================
   let currentUser = null; // { id, name, email } — in-memory for this session only
+  let inPasswordRecovery = false; // true while showing the "set new password" form after an email reset link
 
   async function hashPassword(password){
     const enc = new TextEncoder().encode('hdtonsorium-demo-salt::' + password);
@@ -452,6 +468,7 @@
   function openAccount(){
     accountOverlay.classList.add('open');
     document.body.style.overflow = 'hidden';
+    if (!inPasswordRecovery && !currentUser) setAuthMode('login');
     refreshAccountView();
     document.getElementById('account-close').focus();
   }
@@ -469,6 +486,13 @@
   accountOverlay.addEventListener('click', (e) => { if (e.target === accountOverlay) closeAccount(); });
 
   function refreshAccountView(){
+    if (inPasswordRecovery){
+      guestView.style.display = 'block';
+      userView.style.display = 'none';
+      setAuthMode('reset-confirm');
+      document.getElementById('account-subtitle').textContent = 'Set a new password';
+      return;
+    }
     if (currentUser){
       guestView.style.display = 'none';
       userView.style.display = 'block';
@@ -495,16 +519,42 @@
     refreshAccountView();
   }
 
+  // ---- auth mode switching (login / signup / forgot-password flows) ----
+  const authTabs = document.querySelector('.auth-tabs');
+  const googleWrap = document.querySelector('.google-btn-wrap');
+  const authDivider = document.querySelector('.auth-divider');
+  const guestAuthNote = document.getElementById('guest-bottom-note');
+
+  function setAuthMode(mode){
+    clearAuthErrors();
+    document.getElementById('login-form').style.display = mode === 'login' ? 'block' : 'none';
+    document.getElementById('signup-form').style.display = mode === 'signup' ? 'block' : 'none';
+    document.getElementById('reset-request-form').style.display = mode === 'reset-request' ? 'block' : 'none';
+    document.getElementById('reset-confirm-form').style.display = mode === 'reset-confirm' ? 'block' : 'none';
+    // The Google button, tabs, and divider only make sense for login/signup.
+    const showChrome = mode === 'login' || mode === 'signup';
+    authTabs.style.display = showChrome ? 'flex' : 'none';
+    googleWrap.style.display = showChrome ? 'block' : 'none';
+    document.getElementById('google-note').style.display = showChrome ? 'block' : 'none';
+    authDivider.style.display = showChrome ? 'flex' : 'none';
+    if (guestAuthNote) guestAuthNote.style.display = showChrome ? 'block' : 'none';
+    document.getElementById('reset-request-sent').style.display = 'none';
+    if (mode === 'login' || mode === 'signup') {
+      document.querySelectorAll('.auth-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+    }
+  }
+
   // ---- tab switching ----
   document.querySelectorAll('.auth-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      const mode = tab.dataset.mode;
-      document.getElementById('login-form').style.display = mode === 'login' ? 'block' : 'none';
-      document.getElementById('signup-form').style.display = mode === 'signup' ? 'block' : 'none';
-    });
+    tab.addEventListener('click', () => setAuthMode(tab.dataset.mode));
   });
+
+  document.getElementById('login-forgot-link').addEventListener('click', () => {
+    const prefill = document.getElementById('login-email').value.trim();
+    setAuthMode('reset-request');
+    if (prefill) document.getElementById('reset-email').value = prefill;
+  });
+  document.getElementById('reset-back-link').addEventListener('click', () => setAuthMode('login'));
 
   function showAuthError(id, msg){
     const el = document.getElementById(id);
@@ -564,6 +614,50 @@
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pw });
     if (error) { showAuthError('login-error', error.message); return; }
     setLoggedIn({ id: data.user.id, name: data.user.user_metadata.full_name || email, email: data.user.email });
+    closeAccount();
+  });
+
+  // ---- forgot password: send reset email ----
+  document.getElementById('reset-request-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearAuthErrors();
+    document.getElementById('reset-request-sent').style.display = 'none';
+    const email = document.getElementById('reset-email').value.trim().toLowerCase();
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (!emailOk){
+      document.getElementById('reset-email-field').classList.add('invalid');
+      return;
+    }
+    if (!requireSupabase(document.getElementById('reset-request-error'))) return;
+
+    const submitBtn = document.querySelector('#reset-request-form button[type="submit"]');
+    submitBtn.disabled = true;
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin
+    });
+    submitBtn.disabled = false;
+    if (error) { showAuthError('reset-request-error', error.message); return; }
+    // Don't reveal whether the email exists in the system — always show success.
+    document.getElementById('reset-request-sent').style.display = 'block';
+  });
+
+  // ---- forgot password: set new password after clicking the email link ----
+  document.getElementById('reset-confirm-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearAuthErrors();
+    const pw = document.getElementById('reset-new-password').value;
+    const confirm = document.getElementById('reset-new-confirm').value;
+    let ok = true;
+    if (pw.length < 8){ document.getElementById('reset-new-password-field').classList.add('invalid'); ok = false; }
+    if (confirm !== pw){ document.getElementById('reset-new-confirm-field').classList.add('invalid'); ok = false; }
+    if (!ok) return;
+    if (!requireSupabase(document.getElementById('reset-confirm-error'))) return;
+
+    const { data, error } = await supabaseClient.auth.updateUser({ password: pw });
+    if (error) { showAuthError('reset-confirm-error', error.message); return; }
+    inPasswordRecovery = false;
+    const user = data.user;
+    setLoggedIn({ id: user.id, name: user.user_metadata.full_name || user.user_metadata.name || user.email, email: user.email });
     closeAccount();
   });
 
@@ -667,8 +761,17 @@
   }
 
   if (supabaseClient) {
+    // Listen for the special PASSWORD_RECOVERY event Supabase fires when someone
+    // arrives via a "reset password" email link. Without this, the automatic
+    // session from that link would just look like a normal login.
+    supabaseClient.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        inPasswordRecovery = true;
+        openAccount();
+      }
+    });
     supabaseClient.auth.getUser().then(({ data: { user } }) => {
-      if (user) setLoggedIn({ id: user.id, name: user.user_metadata.full_name || user.user_metadata.name || user.email, email: user.email });
+      if (user && !inPasswordRecovery) setLoggedIn({ id: user.id, name: user.user_metadata.full_name || user.user_metadata.name || user.email, email: user.email });
     }).catch(err => console.error('HD Tonsorium: getUser failed —', err));
   }
 
