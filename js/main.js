@@ -560,7 +560,7 @@
   // Ready to go live: this uses Google's real Identity Services library.
   // Replace GOOGLE_CLIENT_ID below with a Client ID from Google Cloud Console
   // (registered to this site's real domain) to activate it.
-  const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+  const GOOGLE_CLIENT_ID = '823851769612-0tt5hvckchh0o2kuofurrcqbjh7tfmk4.apps.googleusercontent.com';
 
   document.getElementById('google-signin-btn').addEventListener('click', () => {
     const note = document.getElementById('google-note');
