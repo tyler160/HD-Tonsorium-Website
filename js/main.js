@@ -562,6 +562,23 @@
   // (registered to this site's real domain) to activate it.
   const GOOGLE_CLIENT_ID = '823851769612-0tt5hvckchh0o2kuofurrcqbjh7tfmk4.apps.googleusercontent.com';
 
+  let googleSignInInitialized = false;
+
+  function initializeGoogleSignIn() {
+    if (googleSignInInitialized) return true;
+
+    if (!window.google || !window.google.accounts || !window.google.accounts.id) {
+      return false;
+    }
+
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredential
+    });
+    googleSignInInitialized = true;
+    return true;
+  }
+
   document.getElementById('google-signin-btn').addEventListener('click', () => {
     const note = document.getElementById('google-note');
     if (GOOGLE_CLIENT_ID.startsWith('YOUR_')){
@@ -569,12 +586,12 @@
       note.classList.add('show');
       return;
     }
-    // With a real client ID configured, this initializes Google's official
-    // sign-in flow and creates/logs in the matching account automatically.
-    google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: handleGoogleCredential
-    });
+    if (!initializeGoogleSignIn()) {
+      note.textContent = 'Google Sign-In could not load. Please check your connection and try again.';
+      note.classList.add('show');
+      return;
+    }
+    // The Google client is configured once; each click opens the sign-in prompt.
     google.accounts.id.prompt();
   });
 
