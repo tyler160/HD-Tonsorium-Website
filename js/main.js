@@ -91,6 +91,36 @@
 
   // ---- Shop dashboard open/close ----
   const dashboardOverlay = document.getElementById('dashboard-overlay');
+  let dashboardBookings = [];
+  let dashboardFilter = 'upcoming';
+  const escapeHtml = value => String(value || '').replace(/[&<>'"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
+
+  function paintDashboard(){
+    const list = document.getElementById('dash-list');
+    const stats = document.getElementById('dash-stats');
+    const query = document.getElementById('dash-search').value.trim().toLowerCase();
+    const today = todayISO();
+    const visible = dashboardBookings.filter(b => {
+      const matchSearch = !query || `${b.customer_name} ${b.customer_phone} ${b.service}`.toLowerCase().includes(query);
+      if (!matchSearch) return false;
+      if (dashboardFilter === 'today') return b.appt_date_iso === today && b.status === 'confirmed';
+      if (dashboardFilter === 'cancelled') return b.status === 'cancelled';
+      if (dashboardFilter === 'upcoming') return b.appt_date_iso >= today && b.status === 'confirmed';
+      return true;
+    });
+    const confirmed = dashboardBookings.filter(b => b.status === 'confirmed');
+    const todayCount = confirmed.filter(b => b.appt_date_iso === today).length;
+    stats.innerHTML = `<div class="dash-stat"><span class="num">${confirmed.length}</span><span class="lbl">Active bookings</span></div><div class="dash-stat"><span class="num">${todayCount}</span><span class="lbl">Today</span></div><div class="dash-stat"><span class="num">${dashboardBookings.length}</span><span class="lbl">All records</span></div>`;
+    if (!visible.length) { list.innerHTML = '<div class="dash-empty">No appointments match this view.</div>'; return; }
+    list.innerHTML = visible.map(b => `<article class="appt-card ${b.status === 'cancelled' ? 'is-cancelled' : ''}"><div class="appt-time-block">${escapeHtml(b.appt_time)}</div><div class="appt-main"><div class="name-row"><span class="name">${escapeHtml(b.customer_name)}</span><span class="service-tag">${escapeHtml(b.service)}</span>${b.status === 'cancelled' ? '<span class="status-tag">Cancelled</span>' : ''}</div><div class="meta-row"><span>${escapeHtml(b.appt_date)}</span><span>${escapeHtml(b.customer_phone)}</span></div>${b.notes ? `<div class="notes-line">${escapeHtml(b.notes)}</div>` : ''}</div><div class="appt-actions"><a class="call-btn" href="tel:${escapeHtml(b.customer_phone.replace(/[^0-9+]/g, ''))}">Call</a><button class="${b.status === 'cancelled' ? 'restore-btn' : 'cancel-btn'}" data-booking-id="${b.id}" data-booking-status="${b.status === 'cancelled' ? 'confirmed' : 'cancelled'}">${b.status === 'cancelled' ? 'Restore' : 'Cancel'}</button></div></article>`).join('');
+    list.querySelectorAll('[data-booking-id]').forEach(button => button.addEventListener('click', async () => {
+      button.disabled = true;
+      const { error } = await supabaseClient.rpc('set_booking_status', { p_booking_id: Number(button.dataset.bookingId), p_status: button.dataset.bookingStatus });
+      if (error) { alert(error.message); button.disabled = false; return; }
+      await renderDashboard();
+    }));
+  }
+
   async function renderDashboard(){
     const { data, error } = await supabaseClient.rpc('dashboard_bookings');
     const list = document.getElementById('dash-list');
@@ -99,8 +129,8 @@
       stats.textContent = 'Sign in with the shop owner account to view appointments.';
       if (list) list.innerHTML = '';
     } else {
-      stats.textContent = `${data.length} appointment${data.length === 1 ? '' : 's'} saved`;
-      if (list) list.innerHTML = data.map(b => `<div class="summary-card"><strong>${b.appt_date} · ${b.appt_time}</strong><br>${b.customer_name} · ${b.customer_phone}<br>${b.service}</div>`).join('') || '<p>No appointments yet.</p>';
+      dashboardBookings = data || [];
+      paintDashboard();
     }
   }
   async function openDashboard(){
@@ -115,6 +145,12 @@
   }
   document.getElementById('dashboard-open').addEventListener('click', openDashboard);
   document.getElementById('dashboard-close').addEventListener('click', closeDashboard);
+  document.getElementById('dash-search').addEventListener('input', paintDashboard);
+  document.querySelectorAll('.dash-tab').forEach(tab => tab.addEventListener('click', () => {
+    dashboardFilter = tab.dataset.filter;
+    document.querySelectorAll('.dash-tab').forEach(t => t.classList.toggle('active', t === tab));
+    paintDashboard();
+  }));
   dashboardOverlay.addEventListener('click', (e) => { if (e.target === dashboardOverlay) closeDashboard(); });
 
   document.addEventListener('keydown', (e) => {

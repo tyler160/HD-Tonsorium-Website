@@ -70,3 +70,19 @@ begin
 end;
 $$;
 grant execute on function public.dashboard_bookings() to authenticated;
+
+create or replace function public.set_booking_status(p_booking_id bigint, p_status text)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not exists (select 1 from public.staff_members where user_id = auth.uid()) then
+    raise exception 'Staff access is required.';
+  end if;
+  if p_status not in ('confirmed', 'cancelled') then
+    raise exception 'Invalid booking status.';
+  end if;
+  update public.bookings set status = p_status where id = p_booking_id;
+end;
+$$;
+grant execute on function public.set_booking_status(bigint, text) to authenticated;
